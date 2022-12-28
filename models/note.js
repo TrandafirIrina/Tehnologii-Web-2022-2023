@@ -15,7 +15,7 @@ const Note = sequelize.define("Note", {
       len: [1, 50] // vreau ca titlul sa aiba o lungime de minim 1 caracter si maxim 50 de caractere
     }
   },
-  content: DataTypes.BLOB, // pentru ca notitele sa poata contine atat text cat si imagini
+  content: DataTypes.BLOB('long'), // pentru ca notitele sa poata contine atat text cat si imagini
   subject: {
     type: DataTypes.STRING,
     validate: {
