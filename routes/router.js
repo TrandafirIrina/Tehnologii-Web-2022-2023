@@ -1,5 +1,8 @@
 const express = require("express");
 const router = express.Router();
+const {Op} = require("sequelize");
+const multer = require("multer"); // pentru incarcarea de fisiere pentru campul content al tabelei Notes
+const upload = multer({dest:'uploads/'});
 
 const sequelize = require("../sequelize"); //import din sequelize.js  baza de date
 const Group = require("../models/group"); // import modelul pentru grup
@@ -13,7 +16,8 @@ Student.belongsToMany(Group, { through: "GroupRegistry" }); //Un student face pa
 Group.belongsToMany(Student, { through: "GroupRegistry" });//Un grup contine mai multi studenti, tabela jonctiune
                                                           //denumindu-se GroupRegistry
 Group.belongsToMany(Note, { through: "GroupNotes" }); //Un grup contine mai multe notite
-Note.belongsToMany(Group, { through: "GroupNotes" }); //O notita poata sa fie trimisa in mai multe grupuri
+Note.belongsToMany(Group, { through: "GroupNotes" }); //O notita poata sa fie trimisa in mai multe grupuri, tabela jonctiune
+                                                      // denumindu-se GroupNotes
 
 //GET - pentru a crea tabele (si a le sterge daca existau deja si a le crea din nou)
 router.get("/", async (req, res, next) => {
@@ -110,25 +114,38 @@ router.route("/students/:studentId/notes")
   try{
     const student = await Student.findByPk(req.params.studentId);
     if(student){
-    const notes = await student.getNotes()
-    if(notes){
-      res.status(200).json(notes);
+      if(req.query.keyword){ // daca vreau sa caut notite dupa keyword-uri
+        const notes = await student.getNotes({where:{content:{[Op.like]:`%${req.query.keyword}%`}}})
+        if(notes){
+          res.status(200).json(notes)
+        }else{
+          res.status(404).json({"error":`No notes with the keyword ${req.query.keyword} was found!`})
+        }
+      }else{
+        const notes = await student.getNotes()
+        if(notes){
+          res.status(200).json(notes);
+        }else{
+          res.status(404).json({"error":"Notes not found!"})
+        }
+      }
     }else{
-      res.status(404).json({"error":"Notes not found!"})
+      res.status(404).json({"error":`The student with the id ${req.params.studentId} was not found`})
     }
-  }else{
-    res.status(404).json({"error":`The student with the id ${req.params.studentId} was not found`})
-  }
   }catch(err){
     next(err)
   }
 })
 //POST - pentru adaugarea unei notite pentru un anume student
-.post(async(req,res,next)=>{
+.post(upload.any(),async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
     if(student){
-      const note = await Note.create(req.body);
+      const note = await Note.create({
+        title: req.body.title,
+        content: req.files.shift(),
+        subject: req.body.subject
+      });
       student.addNote(note);
       await student.save();
       res.status(200).json({message:"The note was added!"})
@@ -140,8 +157,9 @@ router.route("/students/:studentId/notes")
   }
 })
 
+
 router.route("/students/:studentId/notes/:noteId")
-//GET - pentru vizualizarea unei anumite notite al unui anumit student
+//GET - pentru vizualizarea unei anumite notite a unui anumit student
 .get(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -160,8 +178,8 @@ router.route("/students/:studentId/notes/:noteId")
     next(err)
   }
 })
-// PUT - pentru editarea unei anumite notite al unui anumit student
-.put(async(req,res,next)=>{
+// PUT - pentru editarea unei anumite notite a unui anumit student
+.put(upload.single('content'),async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
     if(student){
@@ -180,7 +198,7 @@ router.route("/students/:studentId/notes/:noteId")
     next(err)
   }
 })
-//DELETE - pentru stergerea unei anumite notite al unui anumit student
+//DELETE - pentru stergerea unei anumite notite a unui anumit student
 .delete(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -202,7 +220,7 @@ router.route("/students/:studentId/notes/:noteId")
 })
 
 router.route("/students/:studentId/notes/:noteId/tags")
-// GET - pentru afisarea tuturor eticheteleor ale unei anumite notite al unui anumit student
+// GET - pentru afisarea tuturor etichetelor ale unei anumite notite a unui anumit student
 .get(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -250,7 +268,7 @@ router.route("/students/:studentId/notes/:noteId/tags")
 })
 
 router.route("/students/:studentId/notes/:noteId/tags/:tagId")
-//pentru afisarea unei anumite etichete a unei anumite notite al unui anume student
+//pentru afisarea unei anumite etichete a unei anumite notite a unui anume student
 .get(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -329,7 +347,7 @@ router.route("/students/:studentId/notes/:noteId/tags/:tagId")
 })
 
 router.route("/students/:studentId/groups")
-//GET - pentru afisatea tuturor grupurilor ale unui anumit student
+//GET - pentru afisarea tuturor grupurilor ale unui anumit student
 .get(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -347,15 +365,15 @@ router.route("/students/:studentId/groups")
     next(err)
   }
 })
-//POST - pentru adaugarea unui student intr-un grup
+//POST - pentru crearea unui grup de catre un student
 .post(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
     if(student){
      const group = await Group.create(req.body)
-     group.addStudent(student)
+     group.addStudent(student) // adaugarea studentului care a creat grupul in grup
      await student.save()
-     res.status(200).json({"message":"Student added in the group"})
+     res.status(200).json({"message":`Group created and student with id ${req.params.studentId} was added in it`})
     }else{
       res.status(404).json({"error":`The student with the id ${req.params.studentId} was not found`})
     }
@@ -365,6 +383,7 @@ router.route("/students/:studentId/groups")
 })
 
 router.route("/students/:studentId/groups/:groupId")
+// GET - afisarea unui anumit grup din care face parte un anumit student
 .get(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -383,6 +402,26 @@ router.route("/students/:studentId/groups/:groupId")
     next(err)
   }
 })
+// POST - adaugarea unui anumit student intr-un anumit grup deja existent
+.post(async(req,res,next)=>{
+  try{
+    const student = await Student.findByPk(req.params.studentId);
+    if(student){
+      const group = await Group.findByPk(req.params.groupId)
+      if(group){
+        group.addStudent(student);
+        res.status(404).json({message:`The student with the id ${req.params.studentId} was added in the group with the id ${req.params.groupId}`})
+      }else{
+        res.status(404).json({"error":"No groups were found"})
+      }
+    }else{
+      res.status(404).json({"error":`The student with the id ${req.params.studentId} was not found`})
+    }
+  }catch(err){
+    next(err)
+  }
+})
+// PUT - editarea unui anumit grup din care face parte un anumit student
 .put(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -402,6 +441,7 @@ router.route("/students/:studentId/groups/:groupId")
     next(err)
   }
 })
+// DELETE - eliminarea unui student dintr-un anumit grup
 .delete(async(req,res,next)=>{
   try{
     const student = await Student.findByPk(req.params.studentId);
@@ -409,13 +449,75 @@ router.route("/students/:studentId/groups/:groupId")
       const groups = await student.getGroups({where:{id:req.params.groupId}})
       const group = groups.shift()
       if(group){
-        await group.destroy()
-        res.status(200).json({message:`The group with id ${req.params.groupId} was deleted!`})
+        group.removeStudent(student)
+        await student.save()
+        res.status(200).json({message:`The student with id ${req.params.studentId} was removed from the group with the id ${req.params.groupId}!`})
       }else{
         res.status(404).json({"error":"No groups were found"})
       }
     }else{
       res.status(404).json({"error":`The student with the id ${req.params.studentId} was not found`})
+    }
+  }catch(err){
+    next(err)
+  }
+})
+
+router.route("/groups/:groupId/notes/:noteId")
+// GET - vizualizarea unei anumite notite dintr-un anumit grup
+.get(async(req,res,next)=>{
+  try{
+    const group = await Group.findByPk(req.params.groupId);
+    if(group){
+      const notes = await group.getNotes({where:{id:req.params.noteId}})
+      const note = notes.shift()
+      if(note){
+        res.status(200).json(note)
+      }else{
+        res.status(404).json({"error":`The note with the id ${req.params.noteId} was not found!`})
+      }
+    }else{
+      res.status(404).json({"error":`The group with the id ${req.params.groupId} was not found!`})
+    }
+  }catch(err){
+    next(err)
+  }
+})
+// POST - adaugarea unei anumite notite existente intr-un anumit grup
+.post(async(req,res,next)=>{
+  try{
+    const group = await Group.findByPk(req.params.groupId);
+    if(group){
+      const note = await Note.findByPk(req.params.noteId)
+      if(note){
+        group.addNote(note);
+        await group.save();
+        res.status(200).json({message: `The note with the id ${req.params.noteId} was added in the group with the id ${req.params.groupId}`})
+      }else{
+        res.status(404).json({"error":`The note with the id ${req.params.noteId} was not found!`})
+      }
+    }else{
+      res.status(404).json({"error":`The group with the id ${req.params.groupId} was not found!`})
+    }
+  }catch(err){
+    next(err)
+  }
+})
+// DELETE - eliminarea unei anumite notite dintr-un anumit grup
+.delete(async(req,res,next)=>{
+  try{
+    const group = await Group.findByPk(req.params.groupId);
+    if(group){
+      const note = await Note.findByPk(req.params.noteId)
+      if(note){
+        group.removeNote(note);
+        await group.save()
+        res.status(200).json({message: `The note with the id ${req.params.noteId} was eliminated from the group with the id ${req.params.groupId}`})
+      }else{
+        res.status(404).json({"error":`The note with the id ${req.params.noteId} was not found!`})
+      }
+    }else{
+      res.status(404).json({"error":`The group with the id ${req.params.groupId} was not found!`})
     }
   }catch(err){
     next(err)
